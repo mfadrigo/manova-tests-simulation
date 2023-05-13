@@ -1,1 +1,1 @@
-# manova_tests_simulation
+# Manova Simulation
