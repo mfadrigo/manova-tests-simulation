@@ -1,6 +1,6 @@
 # Effect of Covariance-Variance Matrix Structures in Balanced & Unbalanced Designs
 
-## Author: Micah Fadrigo (mfadrigo@uci.edu)
+__Author: Micah Fadrigo (mfadrigo@uci.edu)__
 
 ## Abstract
 This study aims to investigate the impact of positive dependence in variance-covariance
