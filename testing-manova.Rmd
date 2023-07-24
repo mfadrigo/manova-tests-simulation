@@ -1,0 +1,1179 @@
+---
+title: "testing-manova"
+author: "Micah Fadrigo"
+date: "2023-05-14"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(MASS)
+```
+
+$$\Sigma=\begin{pmatrix} 1&c&c\\ c&1&c\\ c&c&1\end{pmatrix}$$
+
+
+# Strongly Dependent Variance-Covariance Matrix ---
+
+## Simulation
+### Data Generation & Preliminary Analysis
+
+Create a function that can generate a specific scenario. In this case we generate `n` = 100 samples from `G` = 3 groups where the last one has a different mean.
+
+```{r}
+cov_matrix_strong <- matrix(c(1, 0.8, 0.8,
+                              0.8, 1, 0.8,
+                              0.8, 0.8, 1), nrow = 3, byrow = TRUE)
+```
+
+```{r}
+n <- 100; G <- 3; mu2 <- c(3,3,3); p <- length(mu2)
+generate_data <- function(n, G, mu2, mu1 = c(0,0,0),
+                          Sigma=cov_matrix_strong){
+  Y <- c()
+  
+  for (g in 1:ceiling(G/2)){
+    Y <- rbind(Y, mvrnorm(n, mu1, Sigma))
+    }
+  for (g in 1:floor(G/2)){
+    Y <- rbind(Y, mvrnorm(n, mu2, Sigma))
+    }
+  Y
+}
+Y<- generate_data(n, G, mu2)
+Y
+```
+
+We can check if the function worked as intended using boxplots. These are useful plots when dealing with real data (rather than in simulation).
+
+```{r}
+groups <- rep(1:G, each=n)
+par(mfrow=c(ceiling(G/3), 2 + (G>=3)))
+
+for (g in 1:G){
+  boxplot(Y[which(groups==g), ], ylim=c(-4, 4), main = paste("Group",g))
+}
+```
+
+### Testing
+
+Build a function that gives you the results of the 4 different tests in a specific scenario. Basically, it outputs whether the four tests reject or not given a specific Y.
+```{r}
+# groups column is made -> if each group had their own column denoting binary: obs in group or not
+
+test <- function(n, G, Y){
+  groups <- rep(c(paste("Group", 1:G)), each=n)
+  obj <- manova(Y ~ groups)
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  reject <- rep(0, 4)
+  for (t in 1:length(tests)){
+    reject[t] <- summary(obj, 
+                         test = tests[t])$stats[1,6]<0.05
+  }
+  reject # return vector size of 4, binary: no reject/reject
+}
+
+results <- test(n, G, Y)
+names(results) <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+results
+```
+
+### Simulate
+
+Combine the functions to get a new function that simulates the scenario B times. 
+```{r}
+# SIMULATE FUNCTION GENERATES DATA AND RUNS TESTS PER SIMULATION OUT OF B TOTAL
+simulate <- function(B, n, G, mu2, Sigma){
+  results <- rep(0, 4)
+  for (b in 1:B){
+    Y <- generate_data(n, G, mu2, Sigma = Sigma)
+    results <- results + test(n, G, Y)
+    }
+  results/B # returns proportion of rejections/#simulations per test
+}
+# function call assumes:
+  ## *same* mean (0) for all pops
+  ## under *same* mean, testing type 1 error: prob reject true null
+  ## "Pillai", "Wilks", "Hotelling-Lawley", "Roy"
+
+# TESTING TYPE I ERROR FOR 100 SIMULATIONS
+simulate(B = 100, n = 100, G = 3, mu2 = c(0,0,0), Sigma = cov_matrix_strong)
+```
+
+- Roy has the highest type 1 error of 0.15
+- Pillai, Wilks, and Hotelling-Lawley have the same type 1 error of 0.07
+
+# Strength of Dependence: Type I Error
+
+The type I error is the error that occurs when mistakenly rejecting a true null hypothesis. We can evaluate it by simulating several times a specific scenario in which all the groups have the same mean and computing the proportion of rejections.
+
+
+## Balanced: Line Plots
+
+### N = 10
+
+```{r}
+
+# Repeat Chunk for sample size: {10, 15, 20, 30}
+n <- 10 # Change to test each sample size
+mu2 <- c(0,0,0) # Tests type I error rate
+# mu2 <- c(1,1,1) # Tests power (example)
+S <- seq(0.1, 0.9, 0.1) # Values of 'c'
+results <- list() # Store results of each simulation
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S)) 
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate(B = 300, 
+                    n = n, 
+                    G = 3, 
+                    mu2 = mu2,
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+
+```
+
+```{r}
+alpha_matrix
+```
+
+```{r}
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 0.3), xlab = "Values for c", ylab = "Type I Error")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("topright", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+abline(h = 0.05, lty = "dotted")
+
+# Add title
+title(main = "Type I Error vs. Strength of Dependence when N = 10")
+```
+It's not uncommon to observe fluctuations or lack of a distinct pattern in the type I error rates as the strength of dependence between variables in the covariance matrix increases. The relationship between the strength of dependence and type I error rates can be influenced by various factors, including the specific tests used, sample size, and the underlying structure of the data.
+
+If you want to further investigate the relationship between the strength of dependence and type I error rates, you can consider conducting additional simulations with __varying sample sizes__, different test statistics, or alternative covariance structures. This can help provide a more comprehensive understanding of the behavior of type I error rates in relation to the strength of dependence in your specific analysis context.
+
+__Assess whether the trend of type I error with increasing strength of dependence holds across different sample sizes.__
+
+### N = 15
+
+```{r}
+library(MASS)
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate(B = 300, 
+                    n = 15, 
+                    G = 3, 
+                    mu2 = c(0,0,0),
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+
+```
+
+```{r}
+alpha_matrix
+```
+
+```{r}
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 0.3), xlab = "Values for c", ylab = "Type I Error")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("topright", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+abline(h = 0.05, lty = "dotted")
+
+# Add title
+title(main = "Type I Error vs. Strength of Dependence when N = 15")
+```
+
+### N = 20
+```{r}
+library(MASS)
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate(B = 300, 
+                    n = 20, 
+                    G = 3, 
+                    mu2 = c(0,0,0),
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+
+```
+
+```{r}
+alpha_matrix
+```
+
+```{r}
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 0.3), xlab = "Values for c", ylab = "Type I Error")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("topright", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+abline(h = 0.05, lty = "dotted")
+
+# Add title
+title(main = "Type I Error vs. Strength of Dependence when N = 20")
+```
+
+### N = 30
+```{r}
+library(MASS)
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate(B = 300, 
+                    n = 30, 
+                    G = 3, 
+                    mu2 = c(0,0,0),
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+
+```
+
+```{r}
+alpha_matrix
+```
+
+```{r}
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 0.3), xlab = "Values for c", ylab = "Type I Error")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("topright", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+abline(h = 0.05, lty = "dotted")
+
+# Add title
+title(main = "Type I Error vs. Strength of Dependence when N = 30")
+```
+
+It seems that there is no clear pattern between strength of dependence and type I error, regardless of the sample size. All tests except Roy tend to fluctuate around 0.05 with increasing values of strength. The only noticeable thing when comparing plots of different sample size is that as sample size increases, all tests except Roy tend to stabilize at or below 0.05. The Roy test has a type I error that is consistently high no matter the strength of dependence and no matter the sample size. As sample size increases, type I error does not stabilize.
+
+__Limitation__: It's possible that in my specific scenario, the chosen sample sizes and covariance structures are not revealing a clear pattern in the type I error rates as the strength of dependence increases.
+
+In some cases, the lack of a clear pattern in the type I error rates may indicate that the relationship between the strength of dependence and type I error rates is complex or non-linear. It's important to interpret the results in a nuanced manner and consider other factors that may influence the type I error rates, such as the specific assumptions and limitations of the MANOVA tests.
+
+## Unbalanced: Line Plots
+
+Exploring other factors such as unbalanced sample sizes between groups could be a worthwhile consideration. Unbalanced sample sizes can introduce additional complexities and potential effects on the statistical analysis.
+
+In some scenarios, having unbalanced sample sizes can impact the statistical power and potentially influence the type I error rates. Unequal group sizes can affect the precision and accuracy of the statistical tests, particularly if the group with the smaller sample size is expected to have a lower effect size or higher variability.
+
+### Third group: Small 
+```{r}
+G <- 3; mu2 <- c(1,1,1); p <- length(mu2)
+
+generate_data_unbalanced_small <- function(n, G, mu2, mu1 = c(0,0,0),
+                          Sigma){
+  Y <- c()
+  
+  for (g in 1:ceiling(G/2)){
+    Y <- rbind(Y, mvrnorm(n, mu1, Sigma)) # Group 1 & 2: 1000
+    }
+  for (g in 1:floor(G/2)){
+    Y <- rbind(Y, mvrnorm(n/100, mu2, Sigma)) # Group 3: 10
+    }
+  Y
+}
+
+test_unbalanced_small <- function(n, G, Y){
+  groups <- rep(c("Group 1", "Group 2", "Group 3"), times = c(1000, 1000, 10))
+  obj <- manova(Y ~ groups)
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  reject <- rep(0, 4)
+  for (t in 1:length(tests)){
+    reject[t] <- summary(obj, 
+                         test = tests[t])$stats[1,6]<0.05
+  }
+  reject # return vector size of 4, binary: no reject/reject
+}
+
+simulate_unbalanced_small <- function(B, n, G, mu2, Sigma){
+  results <- rep(0, 4)
+  for (b in 1:B){
+    Y <- generate_data_unbalanced_small(n, G, mu2, Sigma = Sigma)
+    results <- results + test(n, G, Y)
+    }
+  results/B # returns proportion of rejections/#simulations per test
+}
+```
+
+
+```{r}
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate_unbalanced_small(B = 300, 
+                    n = 1000, # must be 1000 here 
+                    G = 3, 
+                    mu2 = c(0,0,0), # must be 0 0 0
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+```
+
+```{r}
+alpha_matrix
+```
+
+```{r}
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 0.3), xlab = "Values for c", ylab = "Type I Error")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("topright", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+abline(h = 0.05, lty = "dotted")
+
+# Add title
+title(main = "Type I Error vs. Strength of Dependence when N1 = 1000; N2 = 1000; N3 = 10", line = 1, cex.main = 0.8)
+```
+### Second & Third Group: Small
+```{r}
+G <- 3; mu2 <- c(1,1,1); p <- length(mu2)
+
+generate_data_unbalanced_small_two <- function(n, G, mu2, mu1 = c(0,0,0),
+                          Sigma=cov_matrix_strong){
+  Y <- c()
+  
+  Y <- rbind(Y, mvrnorm(n, mu1, Sigma)) # Group 1: 1000
+  Y <- rbind(Y, mvrnorm(n/100, mu1, Sigma)) # Group 2: 10
+  Y <- rbind(Y, mvrnorm(n/100, mu2, Sigma)) # Group 3: 10
+    
+  Y
+}
+
+test_unbalanced_small_two <- function(n, G, Y){
+  groups <- rep(c("Group 1", "Group 2", "Group 3"), times = c(1000, 10, 10))
+  obj <- manova(Y ~ groups)
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  reject <- rep(0, 4)
+  for (t in 1:length(tests)){
+    reject[t] <- summary(obj, 
+                         test = tests[t])$stats[1,6]<0.05
+  }
+  reject # return vector size of 4, binary: no reject/reject
+}
+
+simulate_unbalanced_small_two <- function(B, n, G, mu2, Sigma = cov_matrix_strong){
+  results <- rep(0, 4)
+  for (b in 1:B){
+    Y <- generate_data_unbalanced_small_two(n, G, mu2, Sigma = Sigma)
+    results <- results + test_unbalanced_small_two(n, G, Y)
+    }
+  results/B # returns proportion of rejections/#simulations per test
+}
+```
+
+#### N1 = 1000; N2 = 10; N3 = 10
+
+```{r}
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate_unbalanced_small_two(B = 300, 
+                    n = 1000, # must be 1000 here 
+                    G = 3, 
+                    mu2 = c(0,0,0), # must be 0 0 0
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+```
+
+```{r}
+alpha_matrix
+```
+
+```{r}
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 0.3), xlab = "Values for c", ylab = "Type I Error")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("topright", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+abline(h = 0.05, lty = "dotted")
+
+# Add title
+title(main = "Type I Error vs. Strength of Dependence when N1 = 1000; N2 = 10; N3 = 10", line = 1, cex.main = 0.8)
+```
+
+
+### Third group: Large ------
+
+```{r}
+G <- 3; mu2 <- c(1,1,1); p <- length(mu2)
+
+generate_data_unbalanced_large <- function(n, G, mu2, mu1 = c(0,0,0),
+                          Sigma=cov_matrix_strong){
+  Y <- c()
+  
+  for (g in 1:ceiling(G/2)){
+    Y <- rbind(Y, mvrnorm(n, mu1, Sigma)) # Group 1 & 2: 10
+    }
+  for (g in 1:floor(G/2)){
+    Y <- rbind(Y, mvrnorm(n*100, mu2, Sigma)) # Group 3: 1000
+    }
+  Y
+}
+
+test_unbalanced_large <- function(n, G, Y){
+  groups <- rep(c("Group 1", "Group 2", "Group 3"), times = c(10, 10, 1000))
+  obj <- manova(Y ~ groups)
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  reject <- rep(0, 4)
+  for (t in 1:length(tests)){
+    reject[t] <- summary(obj, 
+                         test = tests[t])$stats[1,6]<0.05
+  }
+  reject # return vector size of 4, binary: no reject/reject
+}
+
+simulate_unbalanced_large <- function(B, n, G, mu2, Sigma = cov_matrix_strong){
+  results <- rep(0, 4)
+  for (b in 1:B){
+    Y <- generate_data_unbalanced_large(n, G, mu2, Sigma = Sigma)
+    results <- results + test_unbalanced_large(n, G, Y)
+    }
+  results/B # returns proportion of rejections/#simulations per test
+}
+```
+
+#### N1 = 10; N2 = 10; N3 = 1000
+
+```{r}
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate_unbalanced_large(B = 300, 
+                    n = 10, # must be 10 here 
+                    G = 3, 
+                    mu2 = c(0,0,0), # must be 0 0 0 here
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+```
+
+```{r}
+alpha_matrix
+```
+
+```{r}
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 0.3), xlab = "Values for c", ylab = "Type I Error")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("topright", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+abline(h = 0.05, lty = "dotted")
+
+# Add title
+title(main = "Type I Error vs. Strength of Dependence when N1 = 10; N2 = 10; N3 = 1000", line = 1, cex.main = 0.8)
+```
+
+### Second & Third Group: Large
+```{r}
+G <- 3; mu2 <- c(1,1,1); p <- length(mu2)
+
+generate_data_unbalanced_large_two <- function(n, G, mu2, mu1 = c(0,0,0),
+                          Sigma){
+  Y <- c()
+  
+  Y <- rbind(Y, mvrnorm(n, mu1, Sigma)) # Group 1: 10
+  Y <- rbind(Y, mvrnorm(n*100, mu1, Sigma)) # Group 2: 1000
+  Y <- rbind(Y, mvrnorm(n*100, mu2, Sigma)) # Group 3: 1000
+    
+  Y
+}
+
+test_unbalanced_large_two <- function(n, G, Y){
+  groups <- rep(c("Group 1", "Group 2", "Group 3"), times = c(10, 1000, 1000))
+  obj <- manova(Y ~ groups)
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  reject <- rep(0, 4)
+  for (t in 1:length(tests)){
+    reject[t] <- summary(obj, 
+                         test = tests[t])$stats[1,6]<0.05
+  }
+  reject # return vector size of 4, binary: no reject/reject
+}
+
+simulate_unbalanced_large_two <- function(B, n, G, mu2, Sigma = cov_matrix_strong){
+  results <- rep(0, 4)
+  for (b in 1:B){
+    Y <- generate_data_unbalanced_large_two(n, G, mu2, Sigma = Sigma)
+    results <- results + test_unbalanced_large_two(n, G, Y)
+    }
+  results/B # returns proportion of rejections/#simulations per test
+}
+```
+
+#### N1 = 10; N2 = 1000; N3 = 1000
+
+```{r}
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate_unbalanced_large_two(B = 300, 
+                    n = 10, # must be 10 here 
+                    G = 3, 
+                    mu2 = c(0,0,0), # must be 0 0 0
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+```
+
+```{r}
+alpha_matrix
+```
+
+```{r}
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 0.3), xlab = "Values for c", ylab = "Type I Error")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("topleft", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+abline(h = 0.05, lty = "dotted")
+
+# Add title
+title(main = "Type I Error vs. Strength of Dependence when N1 = 10; N2 = 1000; N3 = 1000", line = 1, cex.main = 0.8)
+```
+
+# Strength of Dependence: POWER
+
+## Effect Size
+
+It's important to choose an effect size that is not too small nor too large. If the difference between the groups becaomes larger, the power becomes higher and very similar across all groups, making differences in power across tests difficult to distinguish. I assume that out of the 3 groups, two have the same mean vector of 0 and one has a mean vector of 1.
+
+## Balanced: Line Plots
+
+You can observe how the power changes as the strength of dependence varies, which provides insights into the ability of the tests to detect group differences under different covariance structures.
+
+### N = 10
+```{r}
+library(MASS)
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate(B = 300, 
+                    n = 10, 
+                    G = 3, 
+                    mu2 = c(1, 1, 1),
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 1), xlab = "Values for c", ylab = "Power")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("bottomleft", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+# Add title
+title(main = "Power vs. Strength of Dependence when N = 10")
+```
+
+A decrease in power as the strength of dependence increases across all tests, suggests that the tests have a harder time detecting group differences when the variables in the covariance matrix are strongly dependent.
+
+A decrease in power can occur because high dependence between variables reduces the amount of unique information each variable contributes to the analysis. When variables are highly correlated, they tend to provide redundant information, which can make it more challenging for the tests to detect meaningful group differences.
+
+Additionally, high dependence can lead to a more restricted range of possible covariance patterns, making it harder to distinguish between different groups. The tests rely on variations in the covariance structure to detect group differences, and when the covariance patterns are similar due to strong dependence, the tests become less powerful.
+
+It is important to interpret these findings in the context of your specific analysis and consider the implications of the observed decrease in power. It may be necessary to explore alternative methods or adjust the study design to address the challenges posed by strong dependence in the covariance matrix.
+
+__As strength of dependence increases, power decreases.__
+
+__Assess whether the trend of decreasing power holds across different sample sizes.__
+
+### N = 15
+```{r}
+library(MASS)
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate(B = 300, 
+                    n = 15, 
+                    G = 3, 
+                    mu2 = c(1, 1, 1),
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 1), xlab = "Values for c", ylab = "Power")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("bottomleft", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+# Add title
+title(main = "Power vs. Strength of Dependence when N = 15")
+
+```
+
+
+
+
+### N = 20
+```{r}
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate(B = 300, 
+                    n = 20, 
+                    G = 3, 
+                    mu2 = c(1, 1, 1),
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 1), xlab = "Values for c", ylab = "Power")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("bottomleft", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+# Add title
+title(main = "Power vs. Strength of Dependence when N = 20")
+```
+
+
+### N = 30
+```{r}
+library(MASS)
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate(B = 300, 
+                    n = 30, 
+                    G = 3, 
+                    mu2 = c(1, 1, 1),
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 1), xlab = "Values for c", ylab = "Power")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("bottomleft", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+# Add title
+title(main = "Power vs. Strength of Dependence when N = 30")
+
+```
+
+It is not unusual to observe that as sample size increases, the power of a statistical test tends to increase as well. This behavior is expected because larger sample sizes provide more information and reduce the effect of random variation, leading to more precise estimates and stronger evidence against the null hypothesis.
+
+When you notice that the trend of decreasing power with increasing strength of dependence becomes less pronounced as sample size increases, it could be due to the increased statistical power resulting from larger sample sizes. With more data, the test becomes more capable of detecting smaller effects or dependencies, and thus the power may remain relatively high even as the strength of dependence increases.
+
+However, it's important to note that the relationship between power and sample size is not always linear, and it may vary depending on the specific test, the effect size, and the underlying assumptions. Additionally, the impact of sample size on power can be influenced by other factors such as the variability of the data and the specific statistical test being used.
+
+To further explore the relationship between sample size, strength of dependence, and power, you can systematically vary the sample size across a wider range and observe how the power changes. This can help you understand the trade-off between sample size and the ability to detect dependencies accurately.
+
+### Optimal Sample Size
+We see that when the sample size is sufficiently large enough, the trend of decreasing power with increasing strength of dependence in the covariance matrix, becomes less pronounced. Although we want the power to remain relatively high (across all tests) even as the strength of dependence increases, we still need to be able to distinguish between the tests. Too large of a sample size will generally result in high power (>0.9) across all tests. __When the sample size is 15, we see that across all tests, no matter the strength of dependence, the power still remains relatively high (above 0.6)__. Also, the best test, the Roy test, maintains a power between 0.8 and 1.0 no matter the strength of dependence.  
+
+
+## ?Unbalanced: Line Plots
+
+Unequal group sizes can affect the precision and accuracy of the statistical tests, particularly if the group with the smaller sample size is expected to have a lower effect size or higher variability.
+
+Before looking at how power of the tests is affected by unbalanced groups, considering a lower effect size for the group 3 would introduce more variability across all tests. The means for group 3 were all 1's, which was a large enough effect size such that all tests had a high power. In order to see how the trend of power with increasing strength of dependence varied across sample sizes, I had to lower the effect size by 50%. 
+
+### Third group: Small
+
+#### N1 = 1000; N2 = 1000; N3 = 10
+
+```{r}
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate_unbalanced_small(B = 300, 
+                    n = 1000, # must be 1000 here 
+                    G = 3, 
+                    mu2 = c(0.5,0.5,0.5), # must be 1 1 1
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 1.0), xlab = "Values for c", ylab = "Power")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("topright", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+abline(h = 0.90, lty = "dotted")
+
+# Add title
+title(main = "Power vs. Strength of Dependence when N1 = 1000; N2 = 1000; N3 = 10", line = 1, cex.main = 0.8)
+```
+
+When group 3 with the smaller sample size was expected to have a lower effect size or higher variability, all tests weren't too sensitive to the strength of dependence. As the strength increases, the tests had about the same difficulty in identifying true differences between the groups (bc the effect size is smaller and the sample size is smaller). Overall, all tests just had low power below 0.60, and the Roy test had the highest power for all values of strength of dependence.
+
+### Second & Third Group: Small
+
+#### N1 = 1000; N2 = 10; N3 = 10
+```{r}
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate_unbalanced_small_two(B = 300, 
+                    n = 1000, # must be 1000 here 
+                    G = 3, 
+                    mu2 = c(0.5,0.5,0.5), # must be 1 1 1
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 1.0), xlab = "Values for c", ylab = "Power")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("topright", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+abline(h = 0.90, lty = "dotted")
+
+# Add title
+title(main = "Power vs. Strength of Dependence when N1 = 1000; N2 = 10; N3 = 10", line = 1, cex.main = 0.8)
+```
+
+When group 2 and group 3 had the same small sample size, and group 3 was the only differing group with a small effect size, all tests were more sensitive to the strength of dependence. As the strength increases, the tests have a bit more difficulty in identifying true differences between the groups (bc the effect size is smaller and the sample size is smaller for group 3). Although group 2 also had a small sample size, this did not help in increasing overall power.
+
+### Third group: Large ------
+
+#### N1 = 10; N2 = 10; N3 = 1000
+
+```{r}
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate_unbalanced_large(B = 300, 
+                    n = 10, # must be 10 here 
+                    G = 3, 
+                    mu2 = c(0.5,0.5,0.5), # must be 1 1 1 here
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 1.0), xlab = "Values for c", ylab = "Power")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("bottomleft", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+abline(h = 0.90, lty = "dotted")
+
+# Add title
+title(main = "Power vs. Strength of Dependence when N1 = 10; N2 = 10; N3 = 1000", line = 1, cex.main = 0.8)
+```
+
+Despite the higher variability introduced by the small effect size of group 3, the large sample size for group 3 somewhat counteracted this, resulting in overall higher power for all tests. However, although the sample size was larger, decreasing power with increasing strength of dependence is still evident and more pronounced compared to when group 3 sample size was small. 
+
+### Second & Third Group: Large
+
+#### N1 = 10; N2 = 1000; N3 = 1000
+
+```{r}
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate_unbalanced_large_two(B = 300, 
+                    n = 10, # must be 10 here 
+                    G = 3, 
+                    mu2 = c(1,1,1), # must be 1 1 1
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 1.0), xlab = "Values for c", ylab = "Power")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("bottomleft", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+abline(h = 0.90, lty = "dotted")
+
+# Add title
+title(main = "Power vs. Strength of Dependence when N1 = 10; N2 = 1000; N3 = 1000", line = 1, cex.main = 0.8)
+```
+
+When group 2 and group 3 had the same large sample size, and group 3 was the only differing group with a small effect size, no tests were sensitive to the strength of dependence. Because group 3 had a large sample size and at least one of the other two groups sharing the same mean had just as large of a sample size, all tests could perfectly detect that group 3 was different from the rest.
+
+Had I reduced the effect size by 90%, however, the power would drop below 0.4 across all tests, regardless of strength of dependence.
+
+```{r}
+S <- seq(0.1, 0.9, 0.1)
+
+results <- list()
+
+alpha_matrix <- matrix(0, nrow = 4, ncol = length(S))
+
+for (i in 1:length(S)) {
+  tests <- c("Pillai", "Wilks", "Hotelling-Lawley", "Roy")
+  alpha <- simulate_unbalanced_large_two(B = 300, 
+                    n = 10, # must be 10 here 
+                    G = 3, 
+                    mu2 = c(0.05,0.05,0.05), # must be 1 1 1
+                    Sigma = matrix(c(1, S[i], S[i],
+                                     S[i], 1, S[i],
+                                     S[i], S[i], 1), nrow = 3, byrow = TRUE))
+                    
+  alpha_matrix[,i] <- alpha
+  names(alpha) <- tests
+}
+
+# Transpose alpha_matrix
+alpha_matrix_transposed <- t(alpha_matrix)
+
+# Create an empty plot
+plot(1, type = "n", xlim = c(0.1, 0.9), ylim = c(0, 1.0), xlab = "Values for c", ylab = "Power")
+
+# Plot each column of alpha_matrix_transposed as a line
+for (i in 1:ncol(alpha_matrix_transposed)) {
+  lines(S, alpha_matrix_transposed[, i], col = i + 1)
+}
+
+# Add x-axis ticks and labels
+axis(1, at = S, labels = S)
+
+# Add legend
+legend("bottomleft", legend = c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), col = 2:5, lty = 1)
+
+abline(h = 0.90, lty = "dotted")
+
+# Add title
+title(main = "Power vs. Strength of Dependence when N1 = 10; N2 = 1000; N3 = 1000", line = 1, cex.main = 0.8)
+```
+
+In conclusion, both effect size and sample size play a significant role in the power of a test, even more so than the strength of dependence. 
+
+In the balanced design, we examined that as sample size increased, the trend of decreasing power with increasing values of strength of dependence became less prominent. In this scenario we only considered group 3 to have differing mean values of 1. (Limitation: Could've tried with lower mean values to introduce more variability; but I anticipate that a similar trend would manifest, it would just require larger sample sizes).
+
+
+
+
