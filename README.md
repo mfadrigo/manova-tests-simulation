@@ -1,7 +1,6 @@
 # Effect of Covariance-Variance Matrix Structures in Balanced & Unbalanced Designs
 
-## Author
-- Micah Fadrigo (mfadrigo@uci.edu)
+## Author: Micah Fadrigo (mfadrigo@uci.edu)
 
 ## Abstract
 This study aims to investigate the impact of positive dependence in variance-covariance
@@ -17,3 +16,21 @@ time detecting group differences in the presence of strong variable dependence. 
 sample size increased, this trend became less prominent. In the unbalanced design, all three tests
 except Roy had nearly identical power trends as strength of dependence increased. Roy
 consistently had the highest power in both designs.
+
+## Introduction
+In the context of multivariate analysis research, dependent variables are commonly
+chosen with the expectation that they are related to one another, often driven by common
+underlying factors. To adequately account for the relationship between variables, it’s essential to
+consider the structure of the dependent variance-covariance matrix when measuring the precision
+and accuracy of statistical tests. Pillai's Trace, Wilks' Lambda, Hotelling-Lawley's Trace, and
+Roy's Largest Root rely on the relationship between the dependent variables to evaluate the
+significance of group differences in multivariate data.
+In this study, we examine the trends of type I error rate and power across all of the
+aforementioned tests as a function of a fixed value ‘ c’ corresponding to the covariance terms
+(off-diagonal elements) of the variance-covariance matrix. We also assume a fixed variance of
+one for all variables (refer to Figure 1 in Appendix). Furthermore, we studied if these trends (or
+the lack thereof) would hold or change across varying sample sizes. As we know, sample size has
+a direct effect on power such that the larger the sample size, the stronger ability the tests have to
+detect group differences under different covariance structures. Also, higher (lower) power
+typically leads to a lower (higher) type I error rate and so sample size also has an indirect effect
+on type I error rate.
